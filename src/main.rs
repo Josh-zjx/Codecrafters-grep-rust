@@ -5,6 +5,13 @@ use std::process;
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     if pattern.chars().count() == 1 {
         return input_line.contains(pattern);
+    } else if pattern == r"\w" {
+        for i in input_line.chars() {
+            if i.is_alphanumeric() || i == '_' {
+                return true;
+            }
+        }
+        return false;
     } else if pattern == r"\d" {
         for i in input_line.chars() {
             if i.is_numeric() {
