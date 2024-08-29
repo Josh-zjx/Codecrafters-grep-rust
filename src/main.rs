@@ -15,10 +15,20 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
         return false;
     } else if pattern.starts_with('[') {
         let mut allowable: HashSet<char> = HashSet::default();
+
         for i in pattern.chars() {
-            if i != '[' && i != ']' {
+            if i != '[' && i != ']' && i != '^' {
                 allowable.insert(i);
             }
+        }
+
+        if (pattern.bytes().nth(1).unwrap()) == b'^' {
+            for i in input_line.chars() {
+                if !allowable.contains(&i) {
+                    return true;
+                }
+            }
+            return false;
         }
         for i in input_line.chars() {
             if allowable.contains(&i) {
