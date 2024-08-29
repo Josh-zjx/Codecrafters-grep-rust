@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::io;
 use std::process;
@@ -8,6 +9,19 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     } else if pattern == r"\w" {
         for i in input_line.chars() {
             if i.is_alphanumeric() || i == '_' {
+                return true;
+            }
+        }
+        return false;
+    } else if pattern.starts_with('[') {
+        let mut allowable: HashSet<char> = HashSet::default();
+        for i in pattern.chars() {
+            if i != '[' && i != ']' {
+                allowable.insert(i);
+            }
+        }
+        for i in input_line.chars() {
+            if allowable.contains(&i) {
                 return true;
             }
         }
