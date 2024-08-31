@@ -38,6 +38,15 @@ impl Pattern {
                 return false;
             }
         }
+        if self.repeat == OCCURENCE::Optional {
+            if let Some(next) = &self.next {
+                if next.try_match(input_line, index) {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        }
         match &self.allowable {
             ALLOWABLE::Digit => {
                 if !input_line.chars().nth(index).unwrap().is_numeric() {
