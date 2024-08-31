@@ -126,6 +126,9 @@ fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
             '^' => {
                 curr.allowable = ALLOWABLE::StartOfString;
             }
+            '$' => {
+                curr.allowable = ALLOWABLE::EndOfString;
+            }
             c => {
                 let mut charset: HashSet<char> = HashSet::default();
                 charset.insert(c);
