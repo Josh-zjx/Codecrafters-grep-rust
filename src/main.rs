@@ -34,7 +34,9 @@ impl Pattern {
     fn try_match(&self, input_line: &str, index: usize) -> bool {
         let mut index = index;
         if index >= input_line.len() {
-            return false;
+            if index > input_line.len() || self.allowable != ALLOWABLE::EndOfString {
+                return false;
+            }
         }
         match &self.allowable {
             ALLOWABLE::Digit => {
@@ -120,6 +122,9 @@ fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
             }
             '.' => {
                 curr.allowable = ALLOWABLE::Wildcard;
+            }
+            '^' => {
+                curr.allowable = ALLOWABLE::StartOfString;
             }
             c => {
                 let mut charset: HashSet<char> = HashSet::default();
