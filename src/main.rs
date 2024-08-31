@@ -15,6 +15,7 @@ enum ALLOWABLE {
     EndOfString,
     CharSet(HashSet<char>),
     NegCharSet(HashSet<char>),
+    Group(Vec<Pattern>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,7 +24,7 @@ enum OCCURENCE {
     Once,
     OnceOrMore,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct Pattern {
     allowable: ALLOWABLE,
     repeat: OCCURENCE,
@@ -31,32 +32,33 @@ struct Pattern {
 }
 
 impl Pattern {
-    fn try_match(&self, input_line: &str, index: usize) -> bool {
+    fn try_match(&self, input_line: &str, index: usize) -> (bool, usize) {
         let mut index = index;
         if index >= input_line.len() {
             if index > input_line.len() || self.allowable != ALLOWABLE::EndOfString {
-                return false;
+                return (false, index);
             }
         }
         if self.repeat == OCCURENCE::Optional {
             if let Some(next) = &self.next {
-                if next.try_match(input_line, index) {
-                    return true;
+                let (success, end) = next.try_match(input_line, index);
+                if success {
+                    return (success, end);
                 }
             } else {
-                return true;
+                return (true, index);
             }
         }
         match &self.allowable {
             ALLOWABLE::Digit => {
                 if !input_line.chars().nth(index).unwrap().is_numeric() {
-                    return false;
+                    return (false, index);
                 }
                 index += 1;
             }
             ALLOWABLE::Alnum => {
                 if !input_line.chars().nth(index).unwrap().is_alphanumeric() {
-                    return false;
+                    return (false, index);
                 }
                 index += 1;
             }
@@ -65,39 +67,63 @@ impl Pattern {
             }
             ALLOWABLE::CharSet(charset) => {
                 if !charset.contains(&input_line.chars().nth(index).unwrap()) {
-                    return false;
+                    return (false, index);
                 }
                 index += 1;
             }
             ALLOWABLE::NegCharSet(charset) => {
                 if charset.contains(&input_line.chars().nth(index).unwrap()) {
-                    return false;
+                    return (false, index);
                 }
                 index += 1;
             }
             ALLOWABLE::StartOfString => {
                 if index != 0 {
-                    return false;
+                    return (false, index);
                 }
             }
             ALLOWABLE::EndOfString => {
                 if index != input_line.len() {
-                    return false;
+                    return (false, index);
                 }
+            }
+            ALLOWABLE::Group(patterns) => {
+                for subpattern in patterns.iter() {
+                    let (success, end) = subpattern.try_match(input_line, index);
+                    if success {
+                        if let Some(next) = &self.next {
+                            let (success, end) = next.try_match(input_line, end);
+                            if success {
+                                return (success, end);
+                            }
+                        } else {
+                            return (true, end);
+                        }
+                    }
+                }
+                return (false, index);
             }
         }
         if let Some(next) = &self.next {
             if self.repeat == OCCURENCE::OnceOrMore {
-                return next.try_match(input_line, index) || self.try_match(input_line, index);
+                let (success, end) = self.try_match(input_line, index);
+                if success {
+                    return (success, end);
+                }
+                let (success, end) = next.try_match(input_line, index);
+                if success {
+                    return (success, end);
+                }
+                return (false, index);
             }
             return next.try_match(input_line, index);
         } else {
-            return true;
+            return (true, index);
         }
     }
 }
 
-fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
+fn parse_pattern(chars: &mut Peekable<Chars>) -> Pattern {
     let mut curr = Pattern {
         allowable: ALLOWABLE::Wildcard,
         repeat: OCCURENCE::Once,
@@ -113,6 +139,24 @@ fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
                         curr.allowable = ALLOWABLE::Alnum;
                     }
                 }
+            }
+            '(' => {
+                // NOTE: ')' should be handled in this procedure
+                let mut patterns: Vec<Pattern> = vec![];
+                let sub_pattern = parse_pattern(chars);
+                patterns.push(sub_pattern);
+                while let Some(next) = chars.next() {
+                    if next == ')' {
+                        break;
+                    } else if next == '|' {
+                        let sub_pattern = parse_pattern(chars);
+                        patterns.push(sub_pattern);
+                    } else {
+                        panic!("Illegal Input");
+                    }
+                }
+
+                curr.allowable = ALLOWABLE::Group(patterns);
             }
             '[' => {
                 let mut neg = false;
@@ -158,7 +202,7 @@ fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
         }
     }
 
-    if chars.peek().is_none() {
+    if chars.peek().is_none() || *chars.peek().unwrap() == '|' || *chars.peek().unwrap() == ')' {
         curr.next = None;
     } else {
         curr.next = Some(Box::new(parse_pattern(chars)));
@@ -168,12 +212,13 @@ fn parse_pattern(mut chars: Peekable<Chars>) -> Pattern {
 
 fn make_pattern(pattern: &str) -> Pattern {
     let chars = pattern.chars();
-    return parse_pattern(chars.peekable());
+    return parse_pattern(&mut chars.peekable());
 }
 
 fn match_pattern(input_line: &str, pattern: Pattern) -> bool {
     for i in 0..input_line.len() {
-        if pattern.try_match(input_line, i) {
+        let (success, _end) = pattern.try_match(input_line, i);
+        if success {
             return true;
         }
     }
@@ -192,49 +237,6 @@ fn match_string(input_line: &str, pattern: &str) -> bool {
     let _parsed_pattern = make_pattern(pattern);
     let _result = match_pattern(input_line, _parsed_pattern);
     return _result;
-
-    if pattern.chars().count() == 1 {
-        return input_line.contains(pattern);
-    } else if pattern == r"\w" {
-        for i in input_line.chars() {
-            if i.is_alphanumeric() || i == '_' {
-                return true;
-            }
-        }
-        return false;
-    } else if pattern.starts_with('[') {
-        let mut allowable: HashSet<char> = HashSet::default();
-
-        for i in pattern.chars() {
-            if i != '[' && i != ']' && i != '^' {
-                allowable.insert(i);
-            }
-        }
-
-        if (pattern.bytes().nth(1).unwrap()) == b'^' {
-            for i in input_line.chars() {
-                if !allowable.contains(&i) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        for i in input_line.chars() {
-            if allowable.contains(&i) {
-                return true;
-            }
-        }
-        return false;
-    } else if pattern == r"\d" {
-        for i in input_line.chars() {
-            if i.is_numeric() {
-                return true;
-            }
-        }
-        return false;
-    } else {
-        panic!("Unhandled pattern: {}", pattern)
-    }
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
