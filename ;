@@ -1,0 +1,156 @@
+use std::collections::HashSet;
+use std::env;
+use std::io;
+use std::process;
+
+struct PatternUnit {
+    wildcard: bool,
+    neg: bool,
+    allowable: HashSet<u8>,
+    repeat: i32,
+    _capture: bool,
+}
+
+struct Pattern {
+    units: Vec<PatternUnit>,
+}
+
+impl PatternUnit {
+    fn try_match(self, input_line: &str, index: usize) -> Option<usize> {
+        let mut index = index;
+        if index == input_line.len() && !self.wildcard {
+            return None;
+        }
+        for _i in 0..self.repeat {
+            if self
+                .allowable
+                .contains(input_line.as_bytes().get(index).unwrap())
+                == !self.neg
+            {
+                return None;
+            }
+            index += 1;
+            if index == input_line.len() {
+                return None;
+            }
+        }
+        return Some(index);
+    }
+}
+
+fn parse_unit(pattern: &str, index: usize) -> (usize, PatternUnit) {
+    return (
+        index + 1,
+        PatternUnit {
+            wildcard: false,
+            neg: false,
+            allowable: HashSet::default(),
+            repeat: 0,
+            _capture: false,
+        },
+    );
+}
+
+fn parse_pattern(pattern: &str) -> Pattern {
+    let mut pattern_units: Vec<PatternUnit> = vec![];
+    let mut index = 0;
+    while index < pattern.len() {
+        let index, pattern_unit = parse_unit(pattern, index);
+        pattern_units.push(pattern_unit);
+
+    }
+
+    return Pattern { units: vec![] };
+}
+
+fn match_pattern(input_line: &str, index: usize, pattern: Pattern) -> bool {
+    let mut index = index;
+    for i in pattern.units {
+        if let Some(_index) = i.try_match(input_line, index) {
+            index = _index;
+            continue;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn match_string(input_line: &str, pattern: &str) -> bool {
+    /*
+    for i in 0..input_line.len() {
+        if match_pattern(input_line, i, parse_pattern(pattern)) {
+            return true;
+        }
+    }
+    return false;
+    */
+    let _parsed_pattern = parse_pattern(pattern);
+    let _result = match_pattern(input_line, 0, _parsed_pattern);
+
+    if pattern.chars().count() == 1 {
+        return input_line.contains(pattern);
+    } else if pattern == r"\w" {
+        for i in input_line.chars() {
+            if i.is_alphanumeric() || i == '_' {
+                return true;
+            }
+        }
+        return false;
+    } else if pattern.starts_with('[') {
+        let mut allowable: HashSet<char> = HashSet::default();
+
+        for i in pattern.chars() {
+            if i != '[' && i != ']' && i != '^' {
+                allowable.insert(i);
+            }
+        }
+
+        if (pattern.bytes().nth(1).unwrap()) == b'^' {
+            for i in input_line.chars() {
+                if !allowable.contains(&i) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        for i in input_line.chars() {
+            if allowable.contains(&i) {
+                return true;
+            }
+        }
+        return false;
+    } else if pattern == r"\d" {
+        for i in input_line.chars() {
+            if i.is_numeric() {
+                return true;
+            }
+        }
+        return false;
+    } else {
+        panic!("Unhandled pattern: {}", pattern)
+    }
+}
+
+// Usage: echo <input_text> | your_program.sh -E <pattern>
+fn main() {
+    // You can use print statements as follows for debugging, they'll be visible when running tests.
+    println!("Logs from your program will appear here!");
+
+    if env::args().nth(1).unwrap() != "-E" {
+        println!("Expected first argument to be '-E'");
+        process::exit(1);
+    }
+
+    let pattern = env::args().nth(2).unwrap();
+    let mut input_line = String::new();
+
+    io::stdin().read_line(&mut input_line).unwrap();
+
+    // Uncomment this block to pass the first stage
+    if match_string(&input_line, &pattern) {
+        process::exit(0)
+    } else {
+        process::exit(1)
+    }
+}
