@@ -78,6 +78,9 @@ impl Pattern {
             }
         }
         if let Some(next) = &self.next {
+            if self.repeat == OCCURENCE::OnceOrMore {
+                return next.try_match(input_line, index) || self.try_match(input_line, index);
+            }
             return next.try_match(input_line, index);
         } else {
             return true;
