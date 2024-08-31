@@ -41,8 +41,17 @@ struct CaptureState {
 }
 
 impl Pattern {
-    fn try_match(&self, input_line: &str, index: usize, cs: &mut CaptureState) -> (bool, usize) {
+    fn try_match(
+        &self,
+        input_line: &str,
+        index: usize,
+        max_index: usize,
+        cs: &mut CaptureState,
+    ) -> (bool, usize) {
         let mut index = index;
+        if index > max_index {
+            return (false, index);
+        }
         if index >= input_line.len() {
             if index > input_line.len() || self.allowable != ALLOWABLE::EndOfString {
                 return (false, index);
@@ -50,7 +59,7 @@ impl Pattern {
         }
         if self.repeat == OCCURENCE::Optional {
             if let Some(next) = &self.next {
-                let (success, end) = next.try_match(input_line, index, cs);
+                let (success, end) = next.try_match(input_line, index, max_index, cs);
                 if success {
                     return (success, end);
                 }
@@ -98,22 +107,25 @@ impl Pattern {
             }
             ALLOWABLE::Group(patterns) => {
                 for subpattern in patterns.iter() {
-                    let (success, end) = subpattern.try_match(input_line, index, cs);
-                    if success {
-                        cs.captured
-                            .insert(self.capture_count, input_line[index..end].to_string());
-                        println!(
-                            "captured {:} with string {:}",
-                            self.capture_count,
-                            input_line[index..end].to_string()
-                        );
-                        if let Some(next) = &self.next {
-                            let (success, end) = next.try_match(input_line, end, cs);
-                            if success {
-                                return (success, end);
+                    for var_length in (index..max_index).rev() {
+                        let (success, end) =
+                            subpattern.try_match(input_line, index, var_length + 1, cs);
+                        if success {
+                            cs.captured
+                                .insert(self.capture_count, input_line[index..end].to_string());
+                            //println!(
+                            //    "captured {:} with string {:}",
+                            //    self.capture_count,
+                            //    input_line[index..end].to_string()
+                            //);
+                            if let Some(next) = &self.next {
+                                let (success, end) = next.try_match(input_line, end, max_index, cs);
+                                if success {
+                                    return (success, end);
+                                }
+                            } else {
+                                return (true, end);
                             }
-                        } else {
-                            return (true, end);
                         }
                     }
                 }
@@ -124,27 +136,28 @@ impl Pattern {
                     let captured = cs.captured.get(num).unwrap();
                     for c in captured.chars() {
                         if c != input_line.chars().nth(index).unwrap() {
-                            println!("illegal capture {:}", captured);
+                            //println!("illegal capture {:}", captured);
 
                             return (false, index);
                         }
                         index += 1;
                     }
+                    //println!("matched {:}", captured);
                 } else {
-                    println!("No corresponding capture {:}", num);
+                    //println!("No corresponding capture {:}", num);
                     return (false, index);
                 }
             }
         }
 
         if self.repeat == OCCURENCE::OnceOrMore {
-            let (success, end) = self.try_match(input_line, index, cs);
+            let (success, end) = self.try_match(input_line, index, max_index, cs);
             if success {
                 return (success, end);
             }
         }
         if let Some(next) = &self.next {
-            return next.try_match(input_line, index, cs);
+            return next.try_match(input_line, index, max_index, cs);
         } else {
             return (true, index);
         }
@@ -255,7 +268,7 @@ fn make_pattern(pattern: &str, cs: &mut CaptureState) -> Pattern {
 
 fn match_pattern(input_line: &str, pattern: Pattern, cs: &mut CaptureState) -> bool {
     for i in 0..input_line.len() {
-        let (success, _end) = pattern.try_match(input_line, i, cs);
+        let (success, _end) = pattern.try_match(input_line, i, input_line.len() + 1, cs);
         if success {
             return true;
         }
@@ -264,20 +277,12 @@ fn match_pattern(input_line: &str, pattern: Pattern, cs: &mut CaptureState) -> b
 }
 
 fn match_string(input_line: &str, pattern: &str) -> bool {
-    /*
-    for i in 0..input_line.len() {
-        if match_pattern(input_line, i, parse_pattern(pattern)) {
-            return true;
-        }
-    }
-    return false;
-    */
     let mut capture = CaptureState {
         captured: HashMap::default(),
         counter: 1,
     };
     let _parsed_pattern = make_pattern(pattern, &mut capture);
-    println!("{:?}", _parsed_pattern);
+    //println!("{:?}", _parsed_pattern);
     let _result = match_pattern(input_line, _parsed_pattern, &mut capture);
     return _result;
 }
