@@ -1,4 +1,5 @@
 use std::char;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::io;
@@ -16,6 +17,7 @@ enum ALLOWABLE {
     CharSet(HashSet<char>),
     NegCharSet(HashSet<char>),
     Group(Vec<Pattern>),
+    Capture(usize),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,10 +31,17 @@ struct Pattern {
     allowable: ALLOWABLE,
     repeat: OCCURENCE,
     next: Option<Box<Pattern>>,
+    capture_count: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CaptureState {
+    captured: HashMap<usize, String>,
+    counter: usize,
 }
 
 impl Pattern {
-    fn try_match(&self, input_line: &str, index: usize) -> (bool, usize) {
+    fn try_match(&self, input_line: &str, index: usize, cs: &mut CaptureState) -> (bool, usize) {
         let mut index = index;
         if index >= input_line.len() {
             if index > input_line.len() || self.allowable != ALLOWABLE::EndOfString {
@@ -41,7 +50,7 @@ impl Pattern {
         }
         if self.repeat == OCCURENCE::Optional {
             if let Some(next) = &self.next {
-                let (success, end) = next.try_match(input_line, index);
+                let (success, end) = next.try_match(input_line, index, cs);
                 if success {
                     return (success, end);
                 }
@@ -89,10 +98,17 @@ impl Pattern {
             }
             ALLOWABLE::Group(patterns) => {
                 for subpattern in patterns.iter() {
-                    let (success, end) = subpattern.try_match(input_line, index);
+                    let (success, end) = subpattern.try_match(input_line, index, cs);
                     if success {
+                        cs.captured
+                            .insert(self.capture_count, input_line[index..end].to_string());
+                        println!(
+                            "captured {:} with string {:}",
+                            self.capture_count,
+                            input_line[index..end].to_string()
+                        );
                         if let Some(next) = &self.next {
-                            let (success, end) = next.try_match(input_line, end);
+                            let (success, end) = next.try_match(input_line, end, cs);
                             if success {
                                 return (success, end);
                             }
@@ -103,31 +119,44 @@ impl Pattern {
                 }
                 return (false, index);
             }
+            ALLOWABLE::Capture(num) => {
+                if cs.captured.contains_key(num) {
+                    let captured = cs.captured.get(num).unwrap();
+                    for c in captured.chars() {
+                        if c != input_line.chars().nth(index).unwrap() {
+                            println!("illegal capture {:}", captured);
+
+                            return (false, index);
+                        }
+                        index += 1;
+                    }
+                } else {
+                    println!("No corresponding capture {:}", num);
+                    return (false, index);
+                }
+            }
+        }
+
+        if self.repeat == OCCURENCE::OnceOrMore {
+            let (success, end) = self.try_match(input_line, index, cs);
+            if success {
+                return (success, end);
+            }
         }
         if let Some(next) = &self.next {
-            if self.repeat == OCCURENCE::OnceOrMore {
-                let (success, end) = self.try_match(input_line, index);
-                if success {
-                    return (success, end);
-                }
-                let (success, end) = next.try_match(input_line, index);
-                if success {
-                    return (success, end);
-                }
-                return (false, index);
-            }
-            return next.try_match(input_line, index);
+            return next.try_match(input_line, index, cs);
         } else {
             return (true, index);
         }
     }
 }
 
-fn parse_pattern(chars: &mut Peekable<Chars>) -> Pattern {
+fn parse_pattern(chars: &mut Peekable<Chars>, cs: &mut CaptureState) -> Pattern {
     let mut curr = Pattern {
         allowable: ALLOWABLE::Wildcard,
         repeat: OCCURENCE::Once,
         next: None,
+        capture_count: 0,
     };
     if let Some(first) = chars.next() {
         match first {
@@ -137,25 +166,34 @@ fn parse_pattern(chars: &mut Peekable<Chars>) -> Pattern {
                         curr.allowable = ALLOWABLE::Digit;
                     } else if escaped == 'w' {
                         curr.allowable = ALLOWABLE::Alnum;
+                    } else if escaped.is_numeric() {
+                        let mut match_num = escaped.to_string();
+                        while chars.peek().is_some_and(|c: &char| c.is_numeric()) {
+                            match_num += &chars.next().unwrap().to_string();
+                        }
+                        curr.allowable = ALLOWABLE::Capture(match_num.parse::<usize>().unwrap());
                     }
                 }
             }
             '(' => {
                 // NOTE: ')' should be handled in this procedure
+
+                curr.capture_count = cs.counter;
+                cs.counter += 1;
                 let mut patterns: Vec<Pattern> = vec![];
-                let sub_pattern = parse_pattern(chars);
+                let sub_pattern = parse_pattern(chars, cs);
+                //println!("sub_pattern: {:?}", sub_pattern);
                 patterns.push(sub_pattern);
                 while let Some(next) = chars.next() {
                     if next == ')' {
                         break;
                     } else if next == '|' {
-                        let sub_pattern = parse_pattern(chars);
+                        let sub_pattern = parse_pattern(chars, cs);
                         patterns.push(sub_pattern);
                     } else {
                         panic!("Illegal Input");
                     }
                 }
-
                 curr.allowable = ALLOWABLE::Group(patterns);
             }
             '[' => {
@@ -205,19 +243,19 @@ fn parse_pattern(chars: &mut Peekable<Chars>) -> Pattern {
     if chars.peek().is_none() || *chars.peek().unwrap() == '|' || *chars.peek().unwrap() == ')' {
         curr.next = None;
     } else {
-        curr.next = Some(Box::new(parse_pattern(chars)));
+        curr.next = Some(Box::new(parse_pattern(chars, cs)));
     }
     return curr;
 }
 
-fn make_pattern(pattern: &str) -> Pattern {
+fn make_pattern(pattern: &str, cs: &mut CaptureState) -> Pattern {
     let chars = pattern.chars();
-    return parse_pattern(&mut chars.peekable());
+    return parse_pattern(&mut chars.peekable(), cs);
 }
 
-fn match_pattern(input_line: &str, pattern: Pattern) -> bool {
+fn match_pattern(input_line: &str, pattern: Pattern, cs: &mut CaptureState) -> bool {
     for i in 0..input_line.len() {
-        let (success, _end) = pattern.try_match(input_line, i);
+        let (success, _end) = pattern.try_match(input_line, i, cs);
         if success {
             return true;
         }
@@ -234,8 +272,13 @@ fn match_string(input_line: &str, pattern: &str) -> bool {
     }
     return false;
     */
-    let _parsed_pattern = make_pattern(pattern);
-    let _result = match_pattern(input_line, _parsed_pattern);
+    let mut capture = CaptureState {
+        captured: HashMap::default(),
+        counter: 1,
+    };
+    let _parsed_pattern = make_pattern(pattern, &mut capture);
+    println!("{:?}", _parsed_pattern);
+    let _result = match_pattern(input_line, _parsed_pattern, &mut capture);
     return _result;
 }
 
